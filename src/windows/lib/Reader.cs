@@ -16,8 +16,8 @@ namespace WinRTBarcodeReader
 
     using Windows.Foundation;
     using Windows.Graphics.Imaging;
-    using Windows.Media.Capture;
-    using Windows.Media.MediaProperties;
+    //using Windows.Media.Capture;
+    //using Windows.Media.MediaProperties;
     using Windows.Storage.Streams;
 
     using ZXing;
@@ -34,31 +34,6 @@ namespace WinRTBarcodeReader
         /// </summary>
         private BarcodeReader barcodeReader;
 
-        /// <summary>
-        ///     The cancel search flag.
-        /// </summary>
-        private CancellationTokenSource cancelSearch;
-
-        /// <summary>
-        ///     MediaCapture instance, used for barcode search.
-        /// </summary>
-        private MediaCapture capture;
-
-        /// <summary>
-        ///     Encoding properties for mediaCapture object.
-        /// </summary>
-        private ImageEncodingProperties encodingProps;
-
-        /// <summary>
-        ///     Flag that indicates successful barcode search.
-        /// </summary>
-        private bool barcodeFoundOrCancelled;
-
-        /// <summary>
-        ///     Image stream for MediaCapture content.
-        /// </summary>
-        private InMemoryRandomAccessStream imageStream;
-
         #endregion
 
         #region Constructor
@@ -66,18 +41,9 @@ namespace WinRTBarcodeReader
         /// <summary>
         /// Initializes a new instance of the <see cref="Reader" /> class.
         /// </summary>
-        /// <param name="capture">MediaCapture instance.</param>
-        /// <param name="width">Capture frame width.</param>
-        /// <param name="height">Capture frame height.</param>
-        public void Init(MediaCapture capture, uint width, uint height)
+        public void Init()
         {
-            this.capture = capture;
-            encodingProps = ImageEncodingProperties.CreateJpeg();
-            encodingProps.Width = width;
-            encodingProps.Height = height;
-
             barcodeReader = new BarcodeReader {Options = {TryHarder = true}};
-            cancelSearch = new CancellationTokenSource();
         }
 
         #endregion
@@ -88,17 +54,9 @@ namespace WinRTBarcodeReader
         /// Perform async MediaCapture analysis and searches for barcode.
         /// </summary>
         /// <returns>IAsyncOperation object</returns>
-        public IAsyncOperation<Result> ReadCode()
+        public IAsyncOperation<Result> ReadCode(String base64string)
         {
-            return this.Read().AsAsyncOperation();
-        }
-
-        /// <summary>
-        /// Send signal to stop barcode search.
-        /// </summary>
-        public void Stop()
-        {
-            this.cancelSearch.Cancel();
+            return this.Read(base64string).AsAsyncOperation();
         }
 
         #endregion
@@ -109,63 +67,42 @@ namespace WinRTBarcodeReader
         /// Perform async MediaCapture analysis and searches for barcode.
         /// </summary>
         /// <returns>Task object</returns>
-        private async Task<Result> Read()
+        private async Task<Result> Read(String base64string)
         {
-            Result result = null;
-            try
-            {
-                while (result == null)
-                {
-                    result = await GetCameraImage(cancelSearch.Token);
-                }
-            }
-            catch (OperationCanceledException) { }
-
-            return result;
+            return await GetCodeFromImage(base64string);
         }
 
-        /// <summary>
-        /// Perform image capture from mediaCapture object
-        /// </summary>
-        /// <param name="cancelToken">
-        /// The cancel Token.
-        /// </param>
-        /// <returns>
-        /// Decoded barcode string.
-        /// </returns>
-        private async Task<Result> GetCameraImage(CancellationToken cancelToken)
+        private async Task<Result> GetCodeFromImage(String base64string)
         {
-            if (cancelToken.IsCancellationRequested)
+            var imageBytes = Convert.FromBase64String(base64string);
+            using (InMemoryRandomAccessStream ms = new InMemoryRandomAccessStream())
             {
-                throw new OperationCanceledException(cancelToken);
+                using (DataWriter writer = new DataWriter(ms.GetOutputStreamAt(0)))
+                {
+                    writer.WriteBytes((byte[])imageBytes);
+                    writer.StoreAsync().GetResults();
+                }
+
+                var decoder = await BitmapDecoder.CreateAsync(ms);
+
+                byte[] pixels =
+                    (await
+                        decoder.GetPixelDataAsync(BitmapPixelFormat.Rgba8,
+                            BitmapAlphaMode.Ignore,
+                            new BitmapTransform(),
+                            ExifOrientationMode.IgnoreExifOrientation,
+                            ColorManagementMode.DoNotColorManage)).DetachPixelData();
+
+                const BitmapFormat format = BitmapFormat.RGB32;
+
+                var result =
+                    await
+                        Task.Run(
+                            () => barcodeReader.Decode(pixels, (int)decoder.PixelWidth, (int)decoder.PixelHeight, format)
+                        );
+
+                return result;
             }
-
-            imageStream = new InMemoryRandomAccessStream();
-
-            await capture.CapturePhotoToStreamAsync(encodingProps, imageStream);
-            await imageStream.FlushAsync();
-
-            var decoder = await BitmapDecoder.CreateAsync(imageStream);
-
-            byte[] pixels =
-                (await
-                    decoder.GetPixelDataAsync(BitmapPixelFormat.Rgba8,
-                        BitmapAlphaMode.Ignore,
-                        new BitmapTransform(),
-                        ExifOrientationMode.IgnoreExifOrientation,
-                        ColorManagementMode.DoNotColorManage)).DetachPixelData();
-
-            const BitmapFormat format = BitmapFormat.RGB32;
-
-            imageStream.Dispose();
-
-            var result =
-                await
-                    Task.Run(
-                        () => barcodeReader.Decode(pixels, (int) decoder.PixelWidth, (int) decoder.PixelHeight, format),
-                        cancelToken);
-
-            return result;
         }
 
         #endregion

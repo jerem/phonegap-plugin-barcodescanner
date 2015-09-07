@@ -1,176 +1,393 @@
-/*
- * Copyright (c) Microsoft Open Technologies, Inc. All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
- */
+(function () {
+    "use strict";
 
-module.exports = {
+    var Capture = Windows.Media.Capture;
+    var DeviceInformation = Windows.Devices.Enumeration.DeviceInformation;
+    var DeviceClass = Windows.Devices.Enumeration.DeviceClass;
+    var DisplayOrientations = Windows.Graphics.Display.DisplayOrientations;
+    var Imaging = Windows.Graphics.Imaging;
+    var Media = Windows.Media;
 
-    /**
-     * Scans image via device camera and retieves barcode from it.
-     * @param  {function} success Success callback
-     * @param  {function} fail    Error callback
-     * @param  {array} args       Arguments array
-     */
-    scan: function (success, fail, args) {
+    // Receive notifications about rotation of the device and UI and apply any necessary rotation to the preview stream and UI controls
+    var oDisplayInformation = Windows.Graphics.Display.DisplayInformation.getForCurrentView(),
+        oDisplayOrientation = DisplayOrientations.portrait;
 
-        var capturePreview,
-            capturePreviewAlignmentMark,
-            captureCancelButton,
-            capture,
-            reader;
-        
-        /**
-         * Creates a preview frame and necessary objects
-         */
-        function createPreview() {
+    // Prevent the screen from sleeping while the camera is running
+    var oDisplayRequest = new Windows.System.Display.DisplayRequest();
 
-            // Create fullscreen preview
-            capturePreview = document.createElement("video");
-            capturePreview.style.cssText = "position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: black";
+    // For listening to media property changes
+    var oSystemMediaControls = Media.SystemMediaTransportControls.getForCurrentView();
 
-            capturePreviewAlignmentMark = document.createElement('div');
-            capturePreviewAlignmentMark.style.cssText = "position: absolute; left: 0; top: 50%; width: 100%; height: 3px; background: red";
+    // MediaCapture and its state variables
+    var oMediaCapture = null,
+        isInitialized = false,
+        isPreviewing = false;
 
-            // Create cancel button
-            captureCancelButton = document.createElement("button");
-            captureCancelButton.innerText = "Cancel";
-            captureCancelButton.style.cssText = "position: absolute; right: 0; bottom: 0; display: block; margin: 20px";
-            captureCancelButton.addEventListener('click', cancelPreview, false);
+    // Information about the camera device
+    var externalCamera = false,
+        mirroringPreview = false;
 
-            capture = new Windows.Media.Capture.MediaCapture();
-        }
+    // Rotation metadata to apply to the preview stream and recorded videos (MF_MT_VIDEO_ROTATION)
+    // Reference: http://msdn.microsoft.com/en-us/library/windows/apps/xaml/hh868174.aspx
+    var RotationKey = "C380465D-2271-428C-9B83-ECEA3B4A85C1";
 
-        /**
-         * Starts stream transmission to preview frame and then run barcode search
-         */
-        function startPreview() {
-            var captureSettings = new Windows.Media.Capture.MediaCaptureInitializationSettings();
-            captureSettings.streamingCaptureMode = Windows.Media.Capture.StreamingCaptureMode.video;
-            captureSettings.photoCaptureSource = Windows.Media.Capture.PhotoCaptureSource.videoPreview;
+    // Initialization
+    var app = WinJS.Application;
+    var activation = Windows.ApplicationModel.Activation;
+    app.onactivated = function (args) {
+        console.log('onactivated', args)
+        //if (args.detail.kind === activation.ActivationKind.launch) {
+        //    if (args.detail.previousExecutionState !== activation.ApplicationExecutionState.terminated) {
+        //        document.getElementById("getPreviewFrameButton").addEventListener("click", getPreviewFrameButton_tapped);
+        //        previewFrameImage.src = null;
+        //    }
 
-            capture.initializeAsync(captureSettings).done(function () {
+        //    oDisplayInformation.addEventListener("orientationchanged", displayInformation_orientationChanged);
+        //    initializeCameraAsync();
+        //    args.setPromise(WinJS.UI.processAll());
+        //}
+    };
 
-                //trying to set focus mode
-                var controller = capture.videoDeviceController;
+    // About to be suspended
+    app.oncheckpoint = function (args) {
+        console.log('oncheckpoint', args)
+        // Handling of this event is included for completeness, as it will only fire when navigating between pages and this sample only includes one page
+        oDisplayInformation.removeEventListener("orientationchanged", displayInformation_orientationChanged);
+        args.setPromise(cleanupCameraAsync());
+    };
 
-                if (controller.focusControl && controller.focusControl.supported) {
-                    if (controller.focusControl.configure) {
-                        var focusConfig = new Windows.Media.Devices.FocusSettings();
-                        focusConfig.autoFocusRange = Windows.Media.Devices.AutoFocusRange.macro;
+    // Closing
+    app.onunload = function (args) {
+        console.log('onunload', args)
+        oDisplayInformation.removeEventListener("orientationchanged", displayInformation_orientationChanged);
+        //document.getElementById("getPreviewFrameButton").removeEventListener("click", getPreviewFrameButton_tapped);
+        oSystemMediaControls.removeEventListener("propertychanged", systemMediaControls_PropertyChanged);
 
-                        var supportContinuousFocus = controller.focusControl.supportedFocusModes.indexOf(Windows.Media.Devices.FocusMode.continuous).returnValue;
-                        var supportAutoFocus = controller.focusControl.supportedFocusModes.indexOf(Windows.Media.Devices.FocusMode.auto).returnValue;
+        args.setPromise(cleanupCameraAsync());
+    };
 
-                        if (supportContinuousFocus) {
-                            focusConfig.mode = Windows.Media.Devices.FocusMode.continuous;
-                        } else if (supportAutoFocus) {                        
-                            focusConfig.mode = Windows.Media.Devices.FocusMode.auto;
-                        }
+    // Resuming from a user suspension
+    Windows.UI.WebUI.WebUIApplication.addEventListener("resuming", function () {
+        console.log('resuming')
+        oDisplayInformation.addEventListener("orientationchanged", displayInformation_orientationChanged);
+        initializeCameraAsync();
+    }, false);
 
-                        controller.focusControl.configure(focusConfig);
-                        controller.focusControl.focusAsync();
-                    }
-                }
+    /// <summary>
+    /// Initializes the MediaCapture, registers events, gets camera device information for mirroring and rotating, starts preview and unlocks the UI
+    /// </summary>
+    /// <returns></returns>
+    function initializeCameraAsync() {
+        console.log("InitializeCameraAsync");
 
-                var deviceProps = controller.getAvailableMediaStreamProperties(Windows.Media.Capture.MediaStreamType.videoRecord);
+        // Get available devices for capturing pictures
+        return findCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel.back)
+        .then(function (camera) {
+            if (!camera) {
+                console.log("No camera device found!");
+                return;
+            }
+            // Figure out where the camera is located
+            if (!camera.enclosureLocation || camera.enclosureLocation.panel === Windows.Devices.Enumeration.Panel.unknown) {
+                // No information on the location of the camera, assume it's an external camera, not integrated on the device
+                externalCamera = true;
+            }
+            else {
+                // Camera is fixed on the device
+                externalCamera = false;
 
-                deviceProps = Array.prototype.slice.call(deviceProps);
-                deviceProps = deviceProps.filter(function (prop) {
-                    // filter out streams with "unknown" subtype - causes errors on some devices
-                    return prop.subtype !== "Unknown";
-                }).sort(function (propA, propB) {
-                    // sort properties by resolution
-                    return propB.width - propA.width;
-                });
+                // Only mirror the preview if the camera is on the front panel
+                mirroringPreview = (camera.enclosureLocation.panel === Windows.Devices.Enumeration.Panel.front);
+            }
 
-                var maxResProps = deviceProps[0];
+            oMediaCapture = new Capture.MediaCapture();
 
-                controller.setMediaStreamPropertiesAsync(Windows.Media.Capture.MediaStreamType.videoRecord, maxResProps).done(function () {
-                    // handle portrait orientation
-                    if (Windows.Graphics.Display.DisplayProperties.nativeOrientation == Windows.Graphics.Display.DisplayOrientations.portrait) {
-                        capture.setPreviewRotation(Windows.Media.Capture.VideoRotation.clockwise90Degrees);
-                        capturePreview.msZoom = true;
-                    }
+            // Register for a notification when something goes wrong
+            oMediaCapture.addEventListener("failed", mediaCapture_failed);
 
-                    capturePreview.src = URL.createObjectURL(capture);
-                    capturePreview.play();
+            var settings = new Capture.MediaCaptureInitializationSettings();
+            settings.videoDeviceId = camera.id;
 
-                    // Insert preview frame and controls into page
-                    document.body.appendChild(capturePreview);
-                    document.body.appendChild(capturePreviewAlignmentMark);
-                    document.body.appendChild(captureCancelButton);
-
-                    startBarcodeSearch(maxResProps.width, maxResProps.height);
-                });
-            });
-        }
-
-        /**
-         * Starts barcode search process, implemented in WinRTBarcodeReader.winmd library
-         * Calls success callback, when barcode found.
-         */
-        function startBarcodeSearch(width, height) {
-
-            reader = new WinRTBarcodeReader.Reader();
-            reader.init(capture, width, height);
-            reader.readCode().done(function (result) {
-                destroyPreview();
-                success({ text: result && result.text, format: result && result.barcodeFormat, cancelled: !result });
-            }, function (err) {
-                destroyPreview();
-                fail(err);
-            });
-        }
-
-        /**
-         * Removes preview frame and corresponding objects from window
-         */
-        function destroyPreview() {
-
-            capturePreview.pause();
-            capturePreview.src = null;
-
-            [capturePreview, capturePreviewAlignmentMark, captureCancelButton].forEach(function (elem) {
-                elem && document.body.removeChild(elem);
-            });
-            
-            reader && reader.stop();
-            reader = null;
-
-            capture && capture.stopRecordAsync();
-            capture = null;
-        }
-
-        /**
-         * Stops preview and then call success callback with cancelled=true
-         * See https://github.com/phonegap-build/BarcodeScanner#using-the-plugin
-         */
-        function cancelPreview() {
-            reader && reader.stop();
-        }
-        
-        try {
-            createPreview();
-            startPreview();
-        } catch (ex) {
-            fail(ex);
-        }
-    },
-
-    /**
-     * Encodes specified data into barcode
-     * @param  {function} success Success callback
-     * @param  {function} fail    Error callback
-     * @param  {array} args       Arguments array
-     */
-    encode: function (success, fail, args) {
-        fail("Not implemented yet");
+            // Initialize media capture and start the preview
+            return oMediaCapture.initializeAsync(settings);
+        }).then(function () {
+            isInitialized = true;
+            return startPreviewAsync();
+        }, function (error) {
+            console.log(error.message);
+        }).done();
     }
-};
+
+    /// <summary>
+    /// Cleans up the camera resources (after stopping any video recording and/or preview if necessary) and unregisters from MediaCapture events
+    /// </summary>
+    /// <returns></returns>
+    function cleanupCameraAsync() {
+        console.log("cleanupCameraAsync");
+
+        var promiseList = {};
+
+        if (isInitialized) {
+            if (isPreviewing) {
+                // The call to stop the preview is included here for completeness, but can be
+                // safely removed if a call to MediaCapture.close() is being made later,
+                // as the preview will be automatically stopped at that point
+                stopPreview();
+            }
+
+            isInitialized = false;
+        }
+
+        // When all our tasks complete, clean up MediaCapture
+        return WinJS.Promise.join(promiseList)
+        .then(function () {
+            if (oMediaCapture != null) {
+                oMediaCapture.removeEventListener("failed", mediaCapture_failed);
+                oMediaCapture.close();
+                oMediaCapture = null;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Starts the preview and adjusts it for for rotation and mirroring after making a request to keep the screen on
+    /// </summary>
+    function startPreviewAsync() {
+        // Prevent the device from sleeping while the preview is running
+        oDisplayRequest.requestActive();
+
+        // Register to listen for media property changes
+        oSystemMediaControls.addEventListener("propertychanged", systemMediaControls_PropertyChanged);
+
+        // Set the preview source in the UI and mirror it if necessary
+        var previewVidTag = document.getElementById("cameraPreview");
+        if (mirroringPreview) {
+            cameraPreview.style.transform = "scale(-1, 1)";
+        }
+
+        var previewUrl = URL.createObjectURL(oMediaCapture);
+        previewVidTag.src = previewUrl;
+        previewVidTag.play();
+
+        previewVidTag.addEventListener("playing", function () {
+            isPreviewing = true;
+            setPreviewRotationAsync();
+        });
+    }
+
+    /// <summary>
+    /// Gets the current orientation of the UI in relation to the device (when AutoRotationPreferences cannot be honored) and applies a corrective rotation to the preview
+    /// </summary>
+    /// <returns></returns>
+    function setPreviewRotationAsync() {
+        // Only need to update the orientation if the camera is mounted on the device
+        if (externalCamera) {
+            return WinJS.Promise.as();
+        }
+
+        // Calculate which way and how far to rotate the preview
+        var rotationDegrees = convertDisplayOrientationToDegrees(oDisplayOrientation);
+
+        // The rotation direction needs to be inverted if the preview is being mirrored
+        if (mirroringPreview) {
+            rotationDegrees = (360 - rotationDegrees) % 360;
+        }
+
+        // Add rotation metadata to the preview stream to make sure the aspect ratio / dimensions match when rendering and getting preview frames
+        var props = oMediaCapture.videoDeviceController.getMediaStreamProperties(Capture.MediaStreamType.videoPreview);
+        props.properties.insert(RotationKey, rotationDegrees);
+        return oMediaCapture.setEncodingPropertiesAsync(Capture.MediaStreamType.videoPreview, props, null);
+    }
+
+    /// <summary>
+    /// Stops the preview and deactivates a display request, to allow the screen to go into power saving modes
+    /// </summary>
+    /// <returns></returns>
+    function stopPreview() {
+        isPreviewing = false;
+
+        // Cleanup the UI
+        var previewVidTag = document.getElementById("cameraPreview");
+        previewVidTag.pause();
+        previewVidTag.src = null;
+
+        // Allow the device screen to sleep now that the preview is stopped
+        oDisplayRequest.requestRelease();
+    }
+
+
+    /// <summary>
+    /// Attempts to find and return a device mounted on the panel specified, and on failure to find one it will return the first device listed
+    /// </summary>
+    /// <param name="panel">The desired panel on which the returned device should be mounted, if available</param>
+    /// <returns></returns>
+    function findCameraDeviceByPanelAsync(panel) {
+        var deviceInfo = null;
+        // Get available devices for capturing pictures
+        return DeviceInformation.findAllAsync(DeviceClass.videoCapture)
+        .then(function (devices) {
+            devices.forEach(function (cameraDeviceInfo) {
+                if (cameraDeviceInfo.enclosureLocation != null && cameraDeviceInfo.enclosureLocation.panel === panel) {
+                    deviceInfo = cameraDeviceInfo;
+                    return;
+                }
+            });
+
+            // Nothing matched, just return the first
+            if (!deviceInfo && devices.length > 0) {
+                deviceInfo = devices.getAt(0);
+            }
+
+            return deviceInfo;
+        });
+    }
+
+    /// <summary>
+    /// Converts the given orientation of the app on the screen to the corresponding rotation in degrees
+    /// </summary>
+    /// <param name="orientation">The orientation of the app on the screen</param>
+    /// <returns>An orientation in degrees</returns>
+    function convertDisplayOrientationToDegrees(orientation) {
+        switch (orientation) {
+            case DisplayOrientations.portrait:
+                return 90;
+            case DisplayOrientations.landscapeFlipped:
+                return 180;
+            case DisplayOrientations.portraitFlipped:
+                return 270;
+            case DisplayOrientations.landscape:
+            default:
+                return 0;
+        }
+    }
+
+    /// <summary>
+    /// This event will fire when the page is rotated, when the DisplayInformation.AutoRotationPreferences value set in the setupUiAsync() method cannot be not honored.
+    /// </summary>
+    /// <param name="sender">The event source.</param>
+    function displayInformation_orientationChanged(args) {
+        oDisplayOrientation = args.target.currentOrientation;
+
+        if (isPreviewing) {
+            setPreviewRotationAsync();
+        }
+    }
+
+
+    /// <summary>
+    /// In the event of the app being minimized this method handles media property change events. If the app receives a mute
+    /// notification, it is no longer in the foregroud.
+    /// </summary>
+    /// <param name="args"></param>
+    function systemMediaControls_PropertyChanged(args) {
+        // Check to see if the app is being muted. If so, it is being minimized.
+        // Otherwise if it is not initialized, it is being brought into focus.
+        if (args.target.soundLevel === Media.SoundLevel.muted) {
+            cleanupCameraAsync();
+        }
+        else if (!isInitialized) {
+            initializeCameraAsync();
+        }
+    }
+
+    function mediaCapture_failed(errorEventArgs) {
+        console.log("MediaCapture_Failed: 0x" + errorEventArgs.code + ": " + errorEventArgs.message);
+
+        cleanupCameraAsync().done();
+    }
+
+
+    module.exports = {
+        /**
+         * Scans image via device camera and retieves barcode from it.
+         * @param  {function} success Success callback
+         * @param  {function} fail    Error callback
+         * @param  {array} args       Arguments array
+         */
+        scan: function (success, fail, args) {
+            var barcodeReader = new ZXing.BarcodeReader();
+
+            // First we create the HTML markup
+            var canvasBuffer = document.createElement('canvas');
+
+            var div = document.createElement('div');
+            div.style.cssText = 'z-index: 1000; position: absolute; left: 0px; top: 0px; ' +
+                                'height:100%; width:100%; background-color: black;';
+
+            var cameraPreview = document.createElement('video');
+            cameraPreview.id = 'cameraPreview';
+            cameraPreview.style.cssText = 'position: absolute; ' + 
+                                          'left: 50%; top: 50%; ' +
+                                          'transform: translate(-50%, -50%);';
+
+            var alignmentMark = document.createElement('div');
+            alignmentMark.style.cssText = 'position: absolute; ' +
+                                          'left: 0; top: 50%; width: 100%; height: 3px; ' +
+                                          'background: red';
+
+            var cancelButton = document.createElement('button');
+            cancelButton.innerText = 'Cancel';
+            cancelButton.style.cssText = 'z-index:1000; position: absolute; right: 0; bottom: 0; ' +
+                                         'display: block; margin: 20px';
+            cancelButton.addEventListener('click', stop, false);
+
+            div.appendChild(cameraPreview);
+            div.appendChild(alignmentMark);
+            div.appendChild(cancelButton);
+            document.body.appendChild(div);
+
+            function stop() {
+                cleanupCameraAsync();
+                document.body.removeChild(div);
+            }
+
+            function decodeFrame() {
+                if (isPreviewing == false) {
+                    console.log('Scan failed, not previewing.');
+                    return fail();
+                }
+                canvasBuffer.width = cameraPreview.videoWidth;
+                canvasBuffer.height = cameraPreview.videoHeight;
+                var ctx = canvasBuffer.getContext('2d');
+
+                if (oDisplayOrientation == DisplayOrientations.portrait) {
+                    // Why!!??
+                    ctx.drawImage(
+                        cameraPreview,
+                        -(cameraPreview.videoWidth / 2), 0,
+                        cameraPreview.videoWidth * 2, cameraPreview.videoHeight
+                    );
+                } else {
+                    ctx.drawImage(cameraPreview, 0, 0);
+                }
+                var base64string = canvasBuffer.toDataURL();
+
+                var reader = new WinRTBarcodeReader.Reader();
+                reader.init();
+                reader.readCode(base64string.replace(/data:image\/.*,/, '')).done(function (result) {
+                    if (result != null) {
+                        console.log('Scan success', result);
+                        stop();
+                        success({ text: result && result.text, format: result && result.barcodeFormat, cancelled: !result });
+                    } else {
+                        setTimeout(decodeFrame, 100);
+                    }
+                }, function (err) {
+                    console.log('Scan error', err);
+                    stop();
+                    fail(err);
+                });
+            }
+
+            cameraPreview.onplaying = function () {
+                isPreviewing = true;
+                decodeFrame();
+            }
+
+            initializeCameraAsync();
+            oDisplayInformation.addEventListener('orientationchanged', displayInformation_orientationChanged);
+        }
+    }
+})();
 
 require("cordova/exec/proxy").add("BarcodeScanner", module.exports);
