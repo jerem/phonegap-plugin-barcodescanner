@@ -311,12 +311,12 @@
             var canvasBuffer = document.createElement('canvas');
 
             var div = document.createElement('div');
-            div.style.cssText = 'z-index: 1000; position: absolute; left: 0px; top: 0px; ' +
-                                'height:100%; width:100%; background-color: black;';
+            div.style.cssText = 'z-index: 1000; position: absolute; left: 0; top: 0; right: 0; bottom: 0;' +
+                                'touch-action:none; background-color: black;';
 
             var cameraPreview = document.createElement('video');
             cameraPreview.id = 'cameraPreview';
-            cameraPreview.style.cssText = 'position: absolute; ' + 
+            cameraPreview.style.cssText = 'position: absolute; ' +
                                           'left: 50%; top: 50%; ' +
                                           'transform: translate(-50%, -50%);';
 
