@@ -320,9 +320,18 @@
                                           'left: 50%; top: 50%; ' +
                                           'transform: translate(-50%, -50%);';
 
+            var maskTop = document.createElement('div');
+            maskTop.style.cssText = 'position: absolute; left: 0; top: 0; width: 100%; height: 25%; background: black; opacity: 0.4;'
+            var maskLeft = document.createElement('div');
+            maskLeft.style.cssText = 'position: absolute; left: 0; top: 0; width: 10%; height: 50%; transform: translate(0, 50%); background: black; opacity: 0.4;'
+            var maskRight = document.createElement('div');
+            maskRight.style.cssText = 'position: absolute; right: 0; top: 0; width: 10%; height: 50%; transform: translate(0, 50%); background: black; opacity: 0.4;'
+            var maskBotom = document.createElement('div');
+            maskBotom.style.cssText = 'position: absolute; left: 0; bottom: 0; width: 100%; height: 25%; background: black; opacity: 0.4;'
+
             var alignmentMark = document.createElement('div');
             alignmentMark.style.cssText = 'position: absolute; ' +
-                                          'left: 0; top: 50%; width: 100%; height: 3px; ' +
+                                          'left: 0; top: 50%; width: 80%; height: 3px; transform: translate(12.5%, 0); ' +
                                           'background: red';
 
             var cancelButton = document.createElement('button');
@@ -332,6 +341,10 @@
             cancelButton.addEventListener('click', stop, false);
 
             div.appendChild(cameraPreview);
+            div.appendChild(maskTop);
+            div.appendChild(maskLeft);
+            div.appendChild(maskRight);
+            div.appendChild(maskBotom);
             div.appendChild(alignmentMark);
             div.appendChild(cancelButton);
             document.body.appendChild(div);
