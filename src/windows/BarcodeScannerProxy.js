@@ -327,15 +327,8 @@
                                  'width: 200px; height: 200px; ' +
                                  'border: 1000px solid rgba(0, 0, 0, 0.5);';
 
-            var cancelButton = document.createElement('button');
-            cancelButton.innerText = 'Cancel';
-            cancelButton.style.cssText = 'z-index:1000; position: absolute; right: 0; bottom: 0; ' +
-                                         'display: block; margin: 20px';
-            cancelButton.addEventListener('click', stop, false);
-
             wrapper.appendChild(cameraPreview);
             wrapper.appendChild(viewfinder);
-            wrapper.appendChild(cancelButton);
             document.body.appendChild(wrapper);
 
             function stop() {
@@ -388,6 +381,13 @@
 
             initializeCameraAsync();
             oDisplayInformation.addEventListener('orientationchanged', displayInformation_orientationChanged);
+
+            var backbuttonHandler = function (e) {
+                document.removeEventListener('backbutton', backbuttonHandler);
+                e.preventDefault();
+                stop();
+            }
+            document.addEventListener('backbutton', backbuttonHandler);
         }
     }
 })();
