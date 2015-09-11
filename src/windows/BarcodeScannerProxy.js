@@ -310,20 +310,19 @@
             // First we create the HTML markup
             var canvasBuffer = document.createElement('canvas');
 
-            var div = document.createElement('div');
-            div.style.cssText = 'z-index: 1000; position: absolute; left: 0; top: 0; right: 0; bottom: 0;' +
-                                'touch-action:none; background-color: black;';
+            var wrapper = document.createElement('div');
+            wrapper.style.cssText = 'position: absolute; z-index: 1000; ' +
+                                    'left: 0; top: 0; right: 0; bottom: 0; ' +
+                                    'background-color: black; ' +
+                                    'touch-action:none;';
 
             var cameraPreview = document.createElement('video');
             cameraPreview.id = 'cameraPreview';
-            cameraPreview.style.cssText = 'position: absolute; ' +
-                                          'left: 50%; top: 50%; ' +
-                                          'transform: translate(-50%, -50%);';
+            cameraPreview.style.cssText = 'display:block; width: 100%; height: 100%';
 
-            var mask = document.createElement('div');
-            mask.style.cssText = 'position: absolute; ' +
+            var viewfinder = document.createElement('div');
+            viewfinder.style.cssText = 'position: absolute; ' +
                                  'left: 50%; top: 50%; ' +
-                                 'transform: translate(-50%, -50%); ' +
                                  'transform: translate(-50%, -50%); ' +
                                  'width: 200px; height: 200px; ' +
                                  'border: 1000px solid rgba(0, 0, 0, 0.5);';
@@ -334,14 +333,14 @@
                                          'display: block; margin: 20px';
             cancelButton.addEventListener('click', stop, false);
 
-            div.appendChild(cameraPreview);
-            div.appendChild(mask);
-            div.appendChild(cancelButton);
-            document.body.appendChild(div);
+            wrapper.appendChild(cameraPreview);
+            wrapper.appendChild(viewfinder);
+            wrapper.appendChild(cancelButton);
+            document.body.appendChild(wrapper);
 
             function stop() {
                 cleanupCameraAsync();
-                document.body.removeChild(div);
+                document.body.removeChild(wrapper);
             }
 
             function decodeFrame() {
