@@ -31,48 +31,6 @@
     // Reference: http://msdn.microsoft.com/en-us/library/windows/apps/xaml/hh868174.aspx
     var RotationKey = "C380465D-2271-428C-9B83-ECEA3B4A85C1";
 
-    // Initialization
-    var app = WinJS.Application;
-    var activation = Windows.ApplicationModel.Activation;
-    app.onactivated = function (args) {
-        console.log('onactivated', args)
-        //if (args.detail.kind === activation.ActivationKind.launch) {
-        //    if (args.detail.previousExecutionState !== activation.ApplicationExecutionState.terminated) {
-        //        document.getElementById("getPreviewFrameButton").addEventListener("click", getPreviewFrameButton_tapped);
-        //        previewFrameImage.src = null;
-        //    }
-
-        //    oDisplayInformation.addEventListener("orientationchanged", displayInformation_orientationChanged);
-        //    initializeCameraAsync();
-        //    args.setPromise(WinJS.UI.processAll());
-        //}
-    };
-
-    // About to be suspended
-    app.oncheckpoint = function (args) {
-        console.log('oncheckpoint', args)
-        // Handling of this event is included for completeness, as it will only fire when navigating between pages and this sample only includes one page
-        oDisplayInformation.removeEventListener("orientationchanged", displayInformation_orientationChanged);
-        args.setPromise(cleanupCameraAsync());
-    };
-
-    // Closing
-    app.onunload = function (args) {
-        console.log('onunload', args)
-        oDisplayInformation.removeEventListener("orientationchanged", displayInformation_orientationChanged);
-        //document.getElementById("getPreviewFrameButton").removeEventListener("click", getPreviewFrameButton_tapped);
-        oSystemMediaControls.removeEventListener("propertychanged", systemMediaControls_PropertyChanged);
-
-        args.setPromise(cleanupCameraAsync());
-    };
-
-    // Resuming from a user suspension
-    Windows.UI.WebUI.WebUIApplication.addEventListener("resuming", function () {
-        console.log('resuming')
-        oDisplayInformation.addEventListener("orientationchanged", displayInformation_orientationChanged);
-        initializeCameraAsync();
-    }, false);
-
     /// <summary>
     /// Initializes the MediaCapture, registers events, gets camera device information for mirroring and rotating, starts preview and unlocks the UI
     /// </summary>
@@ -331,8 +289,21 @@
             wrapper.appendChild(viewfinder);
             document.body.appendChild(wrapper);
 
+            var pauseHandler = function (e) {
+                console.log('pause', e);
+                stop();
+            }
+
+            var backbuttonHandler = function(e) {
+                e.preventDefault();
+                stop();
+            }
+
             function stop() {
                 cleanupCameraAsync();
+                document.removeEventListener('pause', pauseHandler);
+                document.removeEventListener('backbutton', backbuttonHandler);
+                oDisplayInformation.removeEventListener("orientationchanged", displayInformation_orientationChanged);
                 document.body.removeChild(wrapper);
             }
 
@@ -357,6 +328,11 @@
                 }
                 var base64string = canvasBuffer.toDataURL();
 
+                if (!base64string) {
+                    console.log('Warning, invalid base64 image.')
+                    return setTimeout(decodeFrame, 100);
+                }
+
                 var reader = new WinRTBarcodeReader.Reader();
                 reader.init();
                 reader.readCode(base64string.replace(/data:image\/.*,/, '')).done(function (result) {
@@ -379,15 +355,10 @@
                 decodeFrame();
             }
 
-            initializeCameraAsync();
-            oDisplayInformation.addEventListener('orientationchanged', displayInformation_orientationChanged);
-
-            var backbuttonHandler = function (e) {
-                document.removeEventListener('backbutton', backbuttonHandler);
-                e.preventDefault();
-                stop();
-            }
+            document.addEventListener('pause', pauseHandler);
             document.addEventListener('backbutton', backbuttonHandler);
+            oDisplayInformation.addEventListener('orientationchanged', displayInformation_orientationChanged);
+            initializeCameraAsync();
         }
     }
 })();
