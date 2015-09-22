@@ -326,28 +326,16 @@
                 } else {
                     ctx.drawImage(cameraPreview, 0, 0);
                 }
-                var base64string = canvasBuffer.toDataURL();
 
-                if (!base64string) {
-                    console.log('Warning, invalid base64 image.')
-                    return setTimeout(decodeFrame, 100);
-                }
-
-                var reader = new WinRTBarcodeReader.Reader();
-                reader.init();
-                reader.readCode(base64string.replace(/data:image\/.*,/, '')).done(function (result) {
-                    if (result != null) {
-                        console.log('Scan success', result);
-                        stop();
-                        success({ text: result && result.text, format: result && result.barcodeFormat, cancelled: !result });
-                    } else {
-                        setTimeout(decodeFrame, 100);
-                    }
-                }, function (err) {
-                    console.log('Scan error', err);
+                var imageData = ctx.getImageData(0, 0, canvasBuffer.width, canvasBuffer.height);
+                var result = barcodeReader.decode(imageData.data, imageData.width, imageData.height, ZXing.BitmapFormat.rgba32);
+                if (result) {
                     stop();
-                    fail(err);
-                });
+                    success({ text: result.text, format: result.barcodeFormat });
+                }
+                else {
+                    setTimeout(decodeFrame, 100);
+                }
             }
 
             cameraPreview.onplaying = function () {
