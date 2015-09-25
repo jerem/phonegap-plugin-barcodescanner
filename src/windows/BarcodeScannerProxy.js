@@ -10,7 +10,7 @@
 
     // Receive notifications about rotation of the device and UI and apply any necessary rotation to the preview stream and UI controls
     var oDisplayInformation = Windows.Graphics.Display.DisplayInformation.getForCurrentView(),
-        oDisplayOrientation = DisplayOrientations.portrait;
+        oDisplayOrientation = oDisplayInformation.currentOrientation;
 
     // Prevent the screen from sleeping while the camera is running
     var oDisplayRequest = new Windows.System.Display.DisplayRequest();
@@ -129,7 +129,8 @@
 
         previewVidTag.addEventListener("playing", function () {
             isPreviewing = true;
-            setPreviewRotationAsync();
+            oDisplayOrientation = Windows.Graphics.Display.DisplayInformation.getForCurrentView().currentOrientation;
+            setPreviewRotation();
         });
     }
 
@@ -137,24 +138,18 @@
     /// Gets the current orientation of the UI in relation to the device (when AutoRotationPreferences cannot be honored) and applies a corrective rotation to the preview
     /// </summary>
     /// <returns></returns>
-    function setPreviewRotationAsync() {
-        // Only need to update the orientation if the camera is mounted on the device
-        if (externalCamera) {
-            return WinJS.Promise.as();
+    function setPreviewRotation() {
+        var previewVidTag = document.getElementById("cameraPreview");
+        if (oDisplayOrientation == DisplayOrientations.portrait) {
+            previewVidTag.style.height = "100%";
+            previewVidTag.style.width = "";
+        } else {
+            previewVidTag.style.width = "100%";
+            previewVidTag.style.height = "";
         }
 
-        // Calculate which way and how far to rotate the preview
-        var rotationDegrees = convertDisplayOrientationToDegrees(oDisplayOrientation);
-
-        // The rotation direction needs to be inverted if the preview is being mirrored
-        if (mirroringPreview) {
-            rotationDegrees = (360 - rotationDegrees) % 360;
-        }
-
-        // Add rotation metadata to the preview stream to make sure the aspect ratio / dimensions match when rendering and getting preview frames
-        var props = oMediaCapture.videoDeviceController.getMediaStreamProperties(Capture.MediaStreamType.videoPreview);
-        props.properties.insert(RotationKey, rotationDegrees);
-        return oMediaCapture.setEncodingPropertiesAsync(Capture.MediaStreamType.videoPreview, props, null);
+        var videoRotation = convertDisplayOrientationToVideoRotation(oDisplayOrientation);
+        return oMediaCapture.setPreviewRotation(videoRotation);
     }
 
     /// <summary>
@@ -201,21 +196,21 @@
     }
 
     /// <summary>
-    /// Converts the given orientation of the app on the screen to the corresponding rotation in degrees
+    /// Converts the given orientation of the app on the screen to the corresponding VideoRotation
     /// </summary>
     /// <param name="orientation">The orientation of the app on the screen</param>
-    /// <returns>An orientation in degrees</returns>
-    function convertDisplayOrientationToDegrees(orientation) {
+    /// <returns>A Windows.Media.Capture.VideoRotation</returns>
+    function convertDisplayOrientationToVideoRotation(orientation) {
         switch (orientation) {
             case DisplayOrientations.portrait:
-                return 90;
+                return Windows.Media.Capture.VideoRotation.clockwise90Degrees;
             case DisplayOrientations.landscapeFlipped:
-                return 180;
+                return Windows.Media.Capture.VideoRotation.clockwise180Degrees;
             case DisplayOrientations.portraitFlipped:
-                return 270;
+                return Windows.Media.Capture.VideoRotation.clockwise270Degrees;
             case DisplayOrientations.landscape:
             default:
-                return 0;
+                return Windows.Media.Capture.VideoRotation.none;
         }
     }
 
@@ -225,10 +220,7 @@
     /// <param name="sender">The event source.</param>
     function displayInformation_orientationChanged(args) {
         oDisplayOrientation = args.target.currentOrientation;
-
-        if (isPreviewing) {
-            setPreviewRotationAsync();
-        }
+        setPreviewRotation();
     }
 
 
@@ -263,7 +255,7 @@
          * @param  {array} args       Arguments array
          */
         scan: function (success, fail, args) {
-            var barcodeReader = new ZXing.BarcodeReader();
+            var reader = new ZXing.BarcodeReader();
 
             // First we create the HTML markup
             var canvasBuffer = document.createElement('canvas');
@@ -276,7 +268,9 @@
 
             var cameraPreview = document.createElement('video');
             cameraPreview.id = 'cameraPreview';
-            cameraPreview.style.cssText = 'display:block; width: 100%; height: 100%';
+            cameraPreview.style.cssText = 'position: absolute; ' +
+                                 'left: 50%; top: 50%; ' +
+                                 'transform: translate(-50%, -50%);';
 
             var viewfinder = document.createElement('div');
             viewfinder.style.cssText = 'position: absolute; ' +
@@ -312,23 +306,16 @@
                     console.log('Scan failed, not previewing.');
                     return fail();
                 }
+
                 canvasBuffer.width = cameraPreview.videoWidth;
                 canvasBuffer.height = cameraPreview.videoHeight;
-                var ctx = canvasBuffer.getContext('2d');
 
-                if (oDisplayOrientation == DisplayOrientations.portrait) {
-                    // Why!!??
-                    ctx.drawImage(
-                        cameraPreview,
-                        -(cameraPreview.videoWidth / 2), 0,
-                        cameraPreview.videoWidth * 2, cameraPreview.videoHeight
-                    );
-                } else {
-                    ctx.drawImage(cameraPreview, 0, 0);
-                }
+                var ctx = canvasBuffer.getContext('2d');
+                ctx.drawImage(cameraPreview, 0, 0);
 
                 var imageData = ctx.getImageData(0, 0, canvasBuffer.width, canvasBuffer.height);
-                var result = barcodeReader.decode(imageData.data, imageData.width, imageData.height, ZXing.BitmapFormat.rgba32);
+                reader.options.possibleFormats = [ZXing.BarcodeFormat.qr_CODE];
+                var result = reader.decode(imageData.data, imageData.width, imageData.height, ZXing.BitmapFormat.rgba32);
                 if (result) {
                     stop();
                     success({ text: result.text, format: result.barcodeFormat });
@@ -336,6 +323,7 @@
                 else {
                     setTimeout(decodeFrame, 100);
                 }
+
             }
 
             cameraPreview.onplaying = function () {
