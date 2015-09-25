@@ -314,7 +314,9 @@
                 ctx.drawImage(cameraPreview, 0, 0);
 
                 var imageData = ctx.getImageData(0, 0, canvasBuffer.width, canvasBuffer.height);
-                reader.options.possibleFormats = [ZXing.BarcodeFormat.qr_CODE];
+                for (var option in args) {
+                    reader.options[option] = args[option];
+                }
                 var result = reader.decode(imageData.data, imageData.width, imageData.height, ZXing.BitmapFormat.rgba32);
                 if (result) {
                     stop();
