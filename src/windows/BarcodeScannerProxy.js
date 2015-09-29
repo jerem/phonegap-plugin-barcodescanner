@@ -65,6 +65,7 @@
 
             var settings = new Capture.MediaCaptureInitializationSettings();
             settings.videoDeviceId = camera.id;
+            settings.streamingCaptureMode = Windows.Media.Capture.StreamingCaptureMode.video;
 
             // Initialize media capture and start the preview
             return oMediaCapture.initializeAsync(settings);
