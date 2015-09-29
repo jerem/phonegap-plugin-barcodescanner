@@ -119,11 +119,12 @@
         oSystemMediaControls.addEventListener("propertychanged", systemMediaControls_PropertyChanged);
 
         // Set the preview source in the UI and mirror it if necessary
-        var previewVidTag = document.getElementById("cameraPreview");
+        var cameraWrapper = document.getElementById("cameraWrapper");
         if (mirroringPreview) {
-            cameraPreview.style.transform = "scale(-1, 1)";
+            cameraWrapper.style.transform = "scale(-1, 1)";
         }
 
+        var previewVidTag = document.getElementById("cameraPreview");
         var previewUrl = URL.createObjectURL(oMediaCapture);
         previewVidTag.src = previewUrl;
         previewVidTag.play();
@@ -262,9 +263,11 @@
             var canvasBuffer = document.createElement('canvas');
 
             var wrapper = document.createElement('div');
+            wrapper.id = 'cameraWrapper';
             wrapper.style.cssText = 'position: absolute; z-index: 1000; ' +
                                     'left: 0; top: 0; right: 0; bottom: 0; ' +
                                     'background-color: black; ' +
+                                    'overflow: hidden; ' +
                                     'touch-action:none;';
 
             var cameraPreview = document.createElement('video');
