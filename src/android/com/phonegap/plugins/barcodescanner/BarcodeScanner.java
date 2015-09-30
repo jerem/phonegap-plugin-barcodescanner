@@ -45,6 +45,7 @@ public class BarcodeScanner extends CordovaPlugin {
     private static final String EMAIL_TYPE = "EMAIL_TYPE";
     private static final String PHONE_TYPE = "PHONE_TYPE";
     private static final String SMS_TYPE = "SMS_TYPE";
+    private static final String RESULT_DISPLAY_DURATION_MS = "RESULT_DISPLAY_DURATION_MS";
 
     private static final String LOG_TAG = "BarcodeScanner";
 
@@ -136,7 +137,11 @@ public class BarcodeScanner extends CordovaPlugin {
                         value = obj.get(key);
 
                         if(value instanceof Integer) {
-                            intentScan.putExtra(key, (Integer)value);
+                            if (key.equals(RESULT_DISPLAY_DURATION_MS)) {
+                                intentScan.putExtra(key, ((Integer) value).longValue());
+                            } else {
+                                intentScan.putExtra(key, (Integer)value);
+                            }
                         } else if(value instanceof String) {
                             intentScan.putExtra(key, (String)value);
                         }
