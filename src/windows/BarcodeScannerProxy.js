@@ -115,9 +115,6 @@
         // Prevent the device from sleeping while the preview is running
         oDisplayRequest.requestActive();
 
-        // Register to listen for media property changes
-        oSystemMediaControls.addEventListener("propertychanged", systemMediaControls_PropertyChanged);
-
         // Set the preview source in the UI and mirror it if necessary
         var cameraWrapper = document.getElementById("cameraWrapper");
         if (mirroringPreview) {
@@ -302,6 +299,7 @@
                 document.removeEventListener('pause', pauseHandler);
                 document.removeEventListener('backbutton', backbuttonHandler);
                 oDisplayInformation.removeEventListener("orientationchanged", displayInformation_orientationChanged);
+                oSystemMediaControls.removeEventListener("propertychanged", systemMediaControls_PropertyChanged);
                 document.body.removeChild(wrapper);
             }
 
@@ -340,6 +338,7 @@
             document.addEventListener('pause', pauseHandler);
             document.addEventListener('backbutton', backbuttonHandler);
             oDisplayInformation.addEventListener('orientationchanged', displayInformation_orientationChanged);
+            oSystemMediaControls.addEventListener("propertychanged", systemMediaControls_PropertyChanged);
             initializeCameraAsync();
         }
     }
