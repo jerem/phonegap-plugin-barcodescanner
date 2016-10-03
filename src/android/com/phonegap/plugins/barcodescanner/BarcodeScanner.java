@@ -12,8 +12,10 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.util.Log;
 
 import org.apache.cordova.CordovaPlugin;
@@ -29,6 +31,8 @@ import android.util.Log;
  */
 public class BarcodeScanner extends CordovaPlugin {
     public static final int REQUEST_CODE = 0x0ba7c0de;
+    public static final int CAMERA_REQUEST_CODE = 4242;
+
 
     private static final String SCAN = "scan";
     private static final String ENCODE = "encode";
@@ -50,6 +54,8 @@ public class BarcodeScanner extends CordovaPlugin {
     private static final String LOG_TAG = "BarcodeScanner";
 
     private CallbackContext callbackContext;
+    private String action;
+    private JSONArray args;
 
     /**
      * Constructor.
@@ -75,6 +81,8 @@ public class BarcodeScanner extends CordovaPlugin {
      */
     @Override
     public boolean execute(String action, JSONArray args, CallbackContext callbackContext) {
+        this.action = action;
+        this.args = args;
         this.callbackContext = callbackContext;
 
         if (action.equals(ENCODE)) {
@@ -99,11 +107,37 @@ public class BarcodeScanner extends CordovaPlugin {
                 return true;
             }
         } else if (action.equals(SCAN)) {
-            scan(args);
+            if(cordova.hasPermission(Manifest.permission.CAMERA))
+            {
+                scan(args);
+            }
+            else
+            {
+                cordova.requestPermission(this, CAMERA_REQUEST_CODE, Manifest.permission.CAMERA);
+            }
         } else {
             return false;
         }
         return true;
+    }
+
+    public void onRequestPermissionResult(int requestCode, String[] permissions,
+                                          int[] grantResults) throws JSONException
+    {
+        for(int r:grantResults)
+        {
+            if(r == PackageManager.PERMISSION_DENIED)
+            {
+                this.callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.ERROR, "Permission denied"));
+                return;
+            }
+        }
+        switch(requestCode)
+        {
+            case CAMERA_REQUEST_CODE:
+                this.execute(this.action, this.args, this.callbackContext);
+                break;
+        }
     }
 
     /**
